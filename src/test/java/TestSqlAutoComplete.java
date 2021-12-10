@@ -4,9 +4,7 @@ import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
-import java.util.function.Supplier;
 import java.util.logging.Logger;
 import java.util.stream.IntStream;
 
@@ -24,7 +22,8 @@ public class TestSqlAutoComplete {
             "ON T.a = D.id\n" +
             "WHERE D.age > 10\n" +
             "      ) AS T\n" +
-            "GROUP BY b";;
+            "GROUP BY b";
+    ;
 
     // For testing notice preview sql .
     private static final String testSourceSql = "CREATE TABLE source_table (\n" +
@@ -46,7 +45,12 @@ public class TestSqlAutoComplete {
             ")";
 
     private final List<String> functionTest = new ArrayList<String>() {{
+        add("S");
+        add("arom");
+        add("form");
+        add("oelect");
         add("sel");
+        add("seloct");
         add("select * f");
         add("select * frem");
         add("select * from source_tab");
@@ -84,7 +88,6 @@ public class TestSqlAutoComplete {
      * FST tree implement
      * FST 树初步实现，初步实现第一阶段.不考虑树中间节点可能为一个词，不考虑词频等场景，考虑词频后会更加精确
      * 该部分现在无关返回较多，后续会引入词频统计（常用词靠前解决）
-     *
      */
     @Test
     public void testSqlAutoCompleteImp() {
@@ -107,16 +110,16 @@ public class TestSqlAutoComplete {
      * cast time benchmark. testSqlAutoCompleteImp is better.
      */
     @Test
-    public void benchMark(){
+    public void benchMark() {
         long start = System.currentTimeMillis();
         log.info("Test testFlinkImplementFunction");
-        IntStream.range(0,100).forEach(e -> this.testFlinkImplementFunction());
-        log.info("testFlinkImplementFunction method cast:" + (System.currentTimeMillis()-start));
+        IntStream.range(0, 100).forEach(e -> this.testFlinkImplementFunction());
+        log.info("testFlinkImplementFunction method cast:" + (System.currentTimeMillis() - start));
 
         start = System.currentTimeMillis();
         log.info("Test testSqlAutoCompleteImp");
-        IntStream.range(0,100).forEach(e -> this.testSqlAutoCompleteImp());
-        log.info("testSqlAutoCompleteImp method cast:" + (System.currentTimeMillis()-start));
+        IntStream.range(0, 100).forEach(e -> this.testSqlAutoCompleteImp());
+        log.info("testSqlAutoCompleteImp method cast:" + (System.currentTimeMillis() - start));
 
 
     }
