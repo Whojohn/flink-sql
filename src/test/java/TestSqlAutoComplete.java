@@ -23,7 +23,6 @@ public class TestSqlAutoComplete {
             "WHERE D.age > 10\n" +
             "      ) AS T\n" +
             "GROUP BY b";
-    ;
 
     // For testing notice preview sql .
     private static final String testSourceSql = "CREATE TABLE source_table (\n" +
@@ -72,16 +71,20 @@ public class TestSqlAutoComplete {
         tableEnvironment.executeSql(testSourceSql);
         functionTest.forEach(e -> log.info(Arrays.toString(tableEnvironment.getCompletionHints(e, e.length()))));
 
-        // return
-        // []                                                           # we want select
-        // [FETCH, FROM]                                                # perfect
-        // []                                                           # maybe from is better choice
-        // [default_catalog.default_database.source_table]              # perfect
-        // []                                                           # we want where
-        // [user_id]                                                    # perfect
-        // [xxxxx]                                                      # notice not support typing whitespace
-        // [xxxxx]                                                      # notice not support while use udf
-        // [xxxxx]                                                      # notice not support character notice
+        //[]
+        //[]
+        //[]
+        //[]
+        //[]
+        //[]
+        //[FETCH, FROM]
+        //[]
+        //[default_catalog.default_database.source_table]
+        //[]
+        //[user_id]
+        // [...]
+        // [...]
+        // [...]
     }
 
     /**
@@ -94,16 +97,20 @@ public class TestSqlAutoComplete {
         SqlAutoComplete sqlAutoComplete = new SqlAutoComplete();
         functionTest.forEach(e -> log.info(sqlAutoComplete.getComplete(e).toString()));
 
-        // return
-        // [select, self]                                               # perfect
-        // [frac_second, ... from   ]                                   # perfect
-        // [free]                                                       # maybe from is better choice
-        // []                                                           # need sql parse support, we want table name
-        // [whenever, where]                                            # perfect
-        // [user_defined_type_name, user_defined_type_catalog]          # need sql parse support,we want notice user_id
-        // []                                                           # perfect
-        // substring                                                    # we want substring()
-        // [()]                                                         # perfect
+        //[select, source, string, sql, sum, some, second ...]
+        //[as, from, and, array, at, avg, any, all, add, ...]]
+        //[for, following, foreign, found, transform, ...]]
+        //[select, of, or, on, over, object, old, others, ...]]
+        //[select, self]
+        //[select, second, set, search, self, session, ...]]
+        //[from, for, false, float, filter, first, final, ...]]
+        //[from, free, frac_second]
+        //[source]
+        //[where, with, window, more, work, before, when, ...]
+        //[user_defined_type_schema, user_defined_type_name, ...]]
+        //[]
+        //[substring]
+        //[()]
     }
 
     /**
