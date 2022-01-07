@@ -6,6 +6,7 @@ import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.calcite.shaded.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.flink.calcite.shaded.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.BroadcastStream;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -84,9 +85,9 @@ public class Cep implements Serializable {
 
         // 深拷贝
         List<Metric> temp = new ArrayList<>();
-        for (long a = 0L; a < 100; a++) {
+        for (long a = 0L; a < 1000000; a++) {
             // 时间粒度为 s
-            temp.add(buildEventtime(seedA, a * 10));
+            temp.add(buildEventtime(seedA, a * 50));
 //            temp.add(buildEventtime(seedB, a * 5));
         }
 
@@ -133,54 +134,67 @@ public class Cep implements Serializable {
 
         // 构造广播流，广播流里面的配置会自动根据 rule 里面的规则移除，更新规则，按照 rule_id 作为唯一标识进行增删改查
         BroadcastStream<Rule> streamRule = this.env.addSource(new RichSourceFunction<Rule>() {
-            @Override
-            public void run(SourceContext<Rule> ctx) {
-                returnRuleTestSource().forEach(e -> {
-                    try {
-                        Thread.sleep(100);
-                    } catch (InterruptedException interruptedException) {
+            Boolean label = true;
 
+            @Override
+            public void run(SourceContext<Rule> ctx) throws Exception {
+                while (label) {
+                    for (Rule each : returnRuleTestSource()) {
+                        Thread.sleep(100);
+                        ctx.collect(each);
                     }
-                    ctx.collect(e);
-                });
+                }
             }
 
             @Override
             public void cancel() {
-
+                label = false;
             }
         }).returns(RULE_TYPE_INF).setParallelism(1)
-                .returns(RULE_TYPE_INF).broadcast(RULE_STATE_DESC);
+                .broadcast(RULE_STATE_DESC);
 
         DataStream<Metric> streamRecord = this.env.addSource(new RichSourceFunction<Metric>() {
+            Boolean label = true;
+
+            @Override
+            public void open(Configuration parameters) throws Exception {
+                super.open(parameters);
+
+            }
+
             @Override
             public void run(SourceContext<Metric> ctx) throws Exception {
-                for (Metric each: returnMetricTestSource()){
-                    // 模拟数据不定期进入
-                    Thread.sleep(RandomUtils.nextInt(10, 500));
-                    log.debug(each.toString());
-                    ctx.collect(each);
-                }
+                int loop = 1;
+                while (label) {
+                    for (Metric each :  returnMetricTestSource()) {
+                        // 模拟数据不定期进入
+                        Thread.sleep(RandomUtils.nextInt(1, 5));
+                        log.debug(each.toString());
+                        loop += 1;
+                        each.setEventTime(each.getEventTime()*50*loop);
+                        ctx.collect(each);
+                    }
 
-                // 用于演示，用于关闭最后一个窗口
-                Thread.sleep(60000);
-                Metric seedA = new Metric();
-                seedA.setTags(new HashMap<String, String>() {{
-                    put("accept", "200");
-                    put("relocation", "300");
-                }});
-                seedA.setEventTime(0L);
-                seedA.setMetrics(new HashMap<String, BigDecimal>() {{
-                    put("200", new BigDecimal("1"));
-                    put("300", new BigDecimal("1"));
-                }});
-                ctx.collect(seedA);
-                ctx.close();
+                    // 用于演示，用于关闭最后一个窗口
+                    Thread.sleep(60000);
+                    Metric seedA = new Metric();
+                    seedA.setTags(new HashMap<String, String>() {{
+                        put("accept", "200");
+                        put("relocation", "300");
+                    }});
+                    seedA.setEventTime(0L);
+                    seedA.setMetrics(new HashMap<String, BigDecimal>() {{
+                        put("200", new BigDecimal("1"));
+                        put("300", new BigDecimal("1"));
+                    }});
+                    ctx.collect(seedA);
+                    ctx.close();
+                }
             }
 
             @Override
             public void cancel() {
-
+                this.label = false;
             }
         }).setParallelism(1).returns(METRIC_TYPE_INF)
                 // 没有说明分组方式，直接拿所有 tag 分组
