@@ -1,5 +1,6 @@
 package catalog;
 
+import catalog.conn.BuildFactory;
 import catalog.pojo.PojoCatalogDatabase;
 import catalog.pojo.PojoCatalogTableConnInfo;
 import catalog.pojo.PojoCatalogTableSchema;
@@ -8,10 +9,32 @@ import org.apache.flink.calcite.shaded.com.fasterxml.jackson.core.JsonProcessing
 import org.apache.flink.calcite.shaded.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.calcite.shaded.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.WatermarkSpec;
-import org.apache.flink.table.catalog.*;
-import org.apache.flink.table.catalog.exceptions.*;
+import org.apache.flink.table.catalog.AbstractCatalog;
+import org.apache.flink.table.catalog.CatalogBaseTable;
+import org.apache.flink.table.catalog.CatalogDatabase;
+import org.apache.flink.table.catalog.CatalogDatabaseImpl;
+import org.apache.flink.table.catalog.CatalogFunction;
+import org.apache.flink.table.catalog.CatalogPartition;
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
+import org.apache.flink.table.catalog.CatalogTable;
+import org.apache.flink.table.catalog.CatalogTableImpl;
+import org.apache.flink.table.catalog.CatalogView;
+import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.exceptions.CatalogException;
+import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
+import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
+import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
+import org.apache.flink.table.catalog.exceptions.FunctionAlreadyExistException;
+import org.apache.flink.table.catalog.exceptions.FunctionNotExistException;
+import org.apache.flink.table.catalog.exceptions.PartitionAlreadyExistsException;
+import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
+import org.apache.flink.table.catalog.exceptions.PartitionSpecInvalidException;
+import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
+import org.apache.flink.table.catalog.exceptions.TableNotExistException;
+import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.expressions.Expression;
@@ -23,7 +46,14 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
@@ -48,6 +78,7 @@ public class MyCatalog extends AbstractCatalog {
     private final Map<ObjectPath, Map<CatalogPartitionSpec, CatalogTableStatistics>> partitionStats;
     private final Map<ObjectPath, Map<CatalogPartitionSpec, CatalogColumnStatistics>>
             partitionColumnStats;
+    private final BuildFactory buildFactory;
 
 
     static final String META_STRING = "STRING";
@@ -95,6 +126,8 @@ public class MyCatalog extends AbstractCatalog {
         this.tableColumnStats = new LinkedHashMap<>();
         this.partitionStats = new LinkedHashMap<>();
         this.partitionColumnStats = new LinkedHashMap<>();
+
+        this.buildFactory = new BuildFactory();
     }
 
     @Override
@@ -114,7 +147,8 @@ public class MyCatalog extends AbstractCatalog {
 
                 // 组装连接信息
                 Map<String, String> properties = new HashMap<>();
-                for (PojoCatalogTableConnInfo each : PojoCatalogTableConnInfo.getByTableId(conn, tableId)) {
+
+                for (PojoCatalogTableConnInfo each : this.buildFactory.buildFlinkConn(PojoCatalogTableConnInfo.getByTableId(conn, tableId))) {
                     properties.put(each.getKey(), each.getValue());
                 }
                 ObjectPath tablePath = new ObjectPath(getDefaultDatabase(), eachTable.getTableName());
@@ -125,7 +159,7 @@ public class MyCatalog extends AbstractCatalog {
             }
         } catch (Exception e) {
             throw new CatalogException(
-                    String.format("Failed listing database in catalog %s", getName()), e);
+                    String.format("Failed initial in catalog %s", getName()), e);
         }
         LOG.info("Catalog {} established connection to {}", getName(), defaultUrl);
     }
@@ -250,15 +284,6 @@ public class MyCatalog extends AbstractCatalog {
 
     // ------ tables ------
 
-    /**
-     * 覆盖用户信息实现
-     *
-     * @param tablePath
-     * @param table
-     * @param ignoreIfExists
-     * @throws TableAlreadyExistException
-     * @throws CatalogException
-     */
     @Override
     public void createTable(ObjectPath tablePath, CatalogBaseTable table, boolean ignoreIfExists) throws TableAlreadyExistException, CatalogException {
 
@@ -291,7 +316,18 @@ public class MyCatalog extends AbstractCatalog {
             if (tem.size() > 1) {
                 throw new IllegalStateException("Multiple watermark definition is not supported yet.");
             }
-            builder.watermark(table.getSchema().getWatermarkSpecs().get(0));
+            // fuck 记住，flink 内部把列分为 (TableColumn 子类)： PhysicalColumn (物理存在的列)，MetadataColumn (不知道这个类是什么情况，埋下一个bug)，
+            Arrays.stream(table.getSchema().getFieldNames()).
+                    filter(e -> metaTemplate.getSchema().getTableColumn(e).equals(Optional.empty())).
+                    forEach(e -> builder.field(e, table.getSchema().getFieldDataType(e).get(),
+                            ((TableColumn.ComputedColumn) table.getSchema().getTableColumn(e).get()).getExpression()));
+
+
+            // fuck 官方底层数据结构是做了多个 watermark 支持，但是现在拦截了多个 watermark 支持，后续假如支持多个 watermark 这里需要重写
+            // fuck watermark 也需要带入表达式，别忘了
+            builder.watermark(table.getSchema().getWatermarkSpecs().get(0).getRowtimeAttribute(),
+                    table.getSchema().getWatermarkSpecs().get(0).getWatermarkExpr(),
+                    table.getSchema().getWatermarkSpecs().get(0).getWatermarkExprOutputType());
         }
 
 
@@ -304,7 +340,7 @@ public class MyCatalog extends AbstractCatalog {
         this.tables.put(tablePath,
                 new CatalogTableImpl(builder.build(),
                         properties,
-                        metaTemplate.getComment().equals("") ? table.getComment() : metaTemplate.getComment()
+                        "".equals(metaTemplate.getComment()) ? table.getComment() : metaTemplate.getComment()
                 ).copy());
     }
 
@@ -343,13 +379,6 @@ public class MyCatalog extends AbstractCatalog {
     }
 
 
-    /**
-     *
-     * @param tablePath
-     * @return
-     * @throws TableNotExistException
-     * @throws CatalogException
-     */
     @SneakyThrows
     @Override
     public CatalogBaseTable getTable(ObjectPath tablePath) throws TableNotExistException, CatalogException {
@@ -566,7 +595,7 @@ public class MyCatalog extends AbstractCatalog {
     public List<CatalogPartitionSpec> listPartitions(
             ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
             throws TableNotExistException, TableNotPartitionedException,
-            PartitionSpecInvalidException, CatalogException {
+            CatalogException {
         checkNotNull(tablePath);
         checkNotNull(partitionSpec);
 
@@ -591,7 +620,7 @@ public class MyCatalog extends AbstractCatalog {
     @Override
     public List<CatalogPartitionSpec> listPartitionsByFilter(
             ObjectPath tablePath, List<Expression> filters)
-            throws TableNotExistException, TableNotPartitionedException, CatalogException {
+            throws CatalogException {
         throw new UnsupportedOperationException();
     }
 
@@ -851,7 +880,7 @@ public class MyCatalog extends AbstractCatalog {
 
     private static List<Integer> getParas(String source) {
         return Arrays.stream(source.split("[(|)|,]"))
-                .filter(e -> !e.equals(""))
+                .filter(e -> !"".equals(e))
                 .map(e -> Integer.valueOf(e))
                 .collect(Collectors.toList());
     }

@@ -11,10 +11,13 @@ public class PojoCatalogTableConnInfo {
     Integer tableId;
     String key;
     String value;
-    String comment;
+
+    public final static String META_NAME_KEY = "key";
+    public final static String META_NAME_VALUE = "value";
+    public final static String META_SPEC_FLINK_CONNECTOR = "connector";
 
 
-    public PojoCatalogTableConnInfo(String key, String value ) {
+    public PojoCatalogTableConnInfo(String key, String value) {
         this.key = key;
         this.value = value;
     }
